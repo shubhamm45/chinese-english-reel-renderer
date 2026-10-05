@@ -1,0 +1,12 @@
+{
+  "request_id": "zh-demo-20261005-001",
+  "status": "ready",
+  "video_url": "https://shubhamm45.github.io/chinese-english-reel-renderer/reels/zh-demo-20261005-001/reel.mp4",
+  "design_version": 2,
+  "title": "Speak politely in English",
+  "duration_seconds": 21.5,
+  "width": 1080,
+  "height": 1920,
+  "created_at": "2026-10-05T13:07:18.576519+00:00",
+  "test_audio": false
+}
