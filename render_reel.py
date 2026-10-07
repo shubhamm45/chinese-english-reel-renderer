@@ -210,6 +210,8 @@ def render(lesson, request_id, base_url, public, test_audio=False):
         listing.write_text("".join(f"file '{p.as_posix()}'\n" for p in segments))
         target = out / "reel.mp4"
         run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", "-movflags", "+faststart", str(target)])
+    cover = out / "cover.jpg"
+    run(["ffmpeg", "-y", "-ss", "1.0", "-i", str(target), "-frames:v", "1", "-q:v", "3", str(cover)])
     data = probe(target)
     vs = next(s for s in data["streams"] if s["codec_type"] == "video")
     aud = next(s for s in data["streams"] if s["codec_type"] == "audio")
@@ -221,6 +223,7 @@ def render(lesson, request_id, base_url, public, test_audio=False):
     if duration > 120:
         raise ValueError("Lesson exceeds renderer's 120 second limit")
     manifest = {"request_id": request_id, "status": "ready", "video_url": f"{base_url.rstrip('/')}/reels/{request_id}/reel.mp4",
+        "cover_url": f"{base_url.rstrip('/')}/reels/{request_id}/cover.jpg",
         "design_version": 2, "title": lesson["title"], "duration_seconds": round(duration, 2), "width": 1080, "height": 1920,
         "created_at": datetime.now(timezone.utc).isoformat(), "test_audio": test_audio}
     requests = public / "requests"
