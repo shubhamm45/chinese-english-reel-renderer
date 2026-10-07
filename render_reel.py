@@ -1,4 +1,14 @@
-"""Render one narrated English lesson and publish a request-specific manifest."""
+"""Render one bilingual (Chinese-teaches-English) lesson and publish a manifest.
+
+Lesson JSON schema:
+  title, phrase, phrase_zh, meaning_zh, example, example_zh,
+  say_it, get_it, use_it  (Chinese narration scripts, English words embedded),
+  level, category, topic, caption
+
+Cards are bilingual: English phrase big + Chinese below; the voice
+narrates in Chinese (zh-CN-XiaoxiaoNeural by default).
+Requires a CJK font (fonts-noto-cjk) - DejaVu cannot render Chinese.
+"""
 import argparse
 import asyncio
 import json
@@ -15,14 +25,20 @@ def run(args):
     return subprocess.run(args, check=True, capture_output=True, text=True).stdout
 
 
+LIMITS = {
+    "title": 100, "phrase": 180, "phrase_zh": 180, "meaning_zh": 300,
+    "example": 180, "example_zh": 180,
+    "say_it": 120, "get_it": 120, "use_it": 120,
+}
+
+
 def validate(lesson, request_id):
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", request_id):
         raise ValueError("request_id must be 8-80 letters, digits, underscores or hyphens")
     if not isinstance(lesson, dict):
         raise ValueError("lesson must be a JSON object")
-    for key in ("title", "phrase", "meaning", "example"):
+    for key, limit in LIMITS.items():
         value = lesson.get(key)
-        limit = 100 if key == "title" else 240
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
             raise ValueError(f"{key} must be nonempty text, at most {limit} characters")
     if any(ord(c) < 32 and c not in '\n\t' for v in lesson.values() if isinstance(v, str) for c in v):
@@ -30,13 +46,18 @@ def validate(lesson, request_id):
 
 
 def font(size, bold=False):
-    candidates = [os.environ.get("REEL_FONT", ""),
+    cjk = ("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold
+           else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+    candidates = [os.environ.get("REEL_FONT", ""), cjk,
         f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'-Bold' if bold else ''}.ttf",
         f"/System/Library/Fonts/Supplemental/Arial{' Bold' if bold else ''}.ttf"]
     for path in candidates:
         if path and Path(path).exists():
-            return ImageFont.truetype(path, size)
-    raise RuntimeError("Install DejaVu fonts or set REEL_FONT to a .ttf font")
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    raise RuntimeError("Install fonts-noto-cjk (or DejaVu) or set REEL_FONT to a .ttf/.ttc font")
 
 
 def wrap(draw, text, face, width):
@@ -62,7 +83,20 @@ def wrap(draw, text, face, width):
     return lines
 
 
-def card(label, text, title, index, dest):
+def fit_block(draw, text, width, max_height, start_size, min_size, bold=True):
+    """Shrink font until the wrapped text fits max_height. Returns (face, lines)."""
+    size = start_size
+    while True:
+        face = font(size, bold)
+        lines = wrap(draw, text, face, width)
+        if len(lines) * (size + 18) <= max_height:
+            return face, lines
+        size -= 2
+        if size < min_size:
+            raise ValueError("Text cannot fit on a card")
+
+
+def card(label, primary, secondary, title, index, dest):
     # Keep key content inside the central safe area for Reel controls/captions.
     cream, ink, coral, mint = "#f5f1e8", "#172b29", "#ff704f", "#c9e9d7"
     im = Image.new("RGB", (1080, 1920), cream)
@@ -71,10 +105,10 @@ def card(label, text, title, index, dest):
     d.ellipse((-180, 1480, 300, 1960), fill="#eadfcf")
     # Small editorial masthead and lesson number.
     d.rounded_rectangle((88, 170, 408, 226), radius=28, fill=ink)
-    d.text((111, 182), "ENGLISH / ZH", font=font(27, True), fill=cream)
+    d.text((111, 182), "DAILY / ENGLISH", font=font(27, True), fill=cream)
     d.text((815, 180), f"0{index} / 03", font=font(28, True), fill=ink)
-    headlines = ["Sound more", "Make it", "Try it in"]
-    endings = ["natural.", "click.", "real life."]
+    headlines = ["这样说", "这个意思", "举个例子"]
+    endings = ["更地道。", "要搞懂。", "练一练。"]
     d.text((88, 290), headlines[index-1], font=font(92, True), fill=ink)
     d.text((88, 395), endings[index-1], font=font(92, True), fill=coral)
     panel = (88, 570, 944, 1180)
@@ -83,23 +117,20 @@ def card(label, text, title, index, dest):
     # Offset shadow adds depth without a large empty enclosing card.
     d.rounded_rectangle((100, 584, 956, 1194), radius=38, fill="#ddd4c5")
     d.rounded_rectangle(panel, radius=38, fill=fill)
-    small_label = ["THE PHRASE", "IN PLAIN ENGLISH", "YOUR EXAMPLE"][index-1]
+    small_label = ["英语短语", "中文讲解", "实用例句"][index-1]
     d.text((132, 612), small_label, font=font(26, True), fill=fg)
     d.line((132, 668, 890, 668), fill=fg, width=2)
-    size = 90 if index == 1 else 76
-    while True:
-        face = font(size, True)
-        lines = wrap(d, text, face, 746)
-        height = len(lines) * (size + 18)
-        if height <= 410:
-            break
-        size -= 2
-        if size < 32:
-            raise ValueError("Text cannot fit on a card")
-    y = 710 + (410-height)/2
-    for line in lines:
-        d.text((132, y), line, font=face, fill=fg)
-        y += size + 18
+    # Primary block (English phrase / Chinese explanation), then secondary block.
+    face_p, lines_p = fit_block(d, primary, 746, 300, 84, 30)
+    y = 700
+    for line in lines_p:
+        d.text((132, y), line, font=face_p, fill=fg)
+        y += face_p.size + 18
+    face_s, lines_s = fit_block(d, secondary, 746, 130, 44, 24, bold=False)
+    y = 1030
+    for line in lines_s:
+        d.text((132, y), line, font=face_s, fill=fg)
+        y += face_s.size + 14
     # Deliberate supporting visual, with a different learning cue per scene.
     d.rounded_rectangle((88, 1250, 944, 1428), radius=32, fill="#ffffff")
     d.ellipse((116, 1288, 222, 1394), fill=mint if index != 2 else coral)
@@ -108,20 +139,20 @@ def card(label, text, title, index, dest):
         for n, h in enumerate([16, 35, 58, 78, 44, 26]):
             x = 137 + n*12
             d.rounded_rectangle((x, 1341-h/2, x+6, 1341+h/2), radius=3, fill=ink)
-        heading, detail = "Say it with confidence", "Listen. Then repeat out loud."
+        heading, detail = "大声说出来", "听一遍，然后跟着说。"
     elif index == 2:
         d.line((144, 1340, 163, 1360, 197, 1320), fill=ink, width=8)
-        heading, detail = "One phrase. One idea.", "Keep it simple. Make it stick."
+        heading, detail = "一次只学一句", "简单，才记得牢。"
     else:
         d.rounded_rectangle((141, 1315, 197, 1358), radius=10, outline=ink, width=4)
         d.polygon([(151, 1356), (151, 1371), (171, 1356)], fill=ink)
-        heading, detail = "Your turn to speak", "Make a sentence of your own."
+        heading, detail = "轮到你了", "自己造个句子试试。"
     d.text((252, 1292), heading, font=font(34, True), fill=ink)
     d.text((252, 1350), detail, font=font(27), fill="#5d706a")
     for j, line in enumerate(wrap(d, title, font(28), 800)[:2]):
         d.text((88, 1490+j*36), line, font=font(28), fill="#5d706a")
     # Three-part navigation gives the lesson a clear visual rhythm.
-    for j, stage in enumerate(["SAY IT", "GET IT", "USE IT"]):
+    for j, stage in enumerate(["说出来", "弄懂它", "练起来"]):
         x = 88+j*290
         d.rounded_rectangle((x, 1608, x+270, 1616), radius=4, fill=coral if j+1 == index else "#ddd6cb")
         d.text((x, 1636), stage, font=font(24, True), fill=ink if j+1 == index else "#86928b")
@@ -132,7 +163,7 @@ async def speak(text, voice, path):
     import edge_tts
     for attempt in range(3):
         try:
-            await edge_tts.Communicate(text, voice, rate="-8%").save(str(path))
+            await edge_tts.Communicate(text, voice, rate="-5%").save(str(path))
             return
         except Exception:
             if attempt == 2:
@@ -152,19 +183,22 @@ def render(lesson, request_id, base_url, public, test_audio=False):
     if out.exists():
         raise ValueError("request_id already exists; use a fresh unique ID")
     out.mkdir(parents=True)
-    sections = [("Say this", lesson["phrase"], f"{lesson['title']}. Today's phrase: {lesson['phrase']}"),
-        ("Meaning", lesson["meaning"], f"Meaning: {lesson['meaning']}"),
-        ("Example", lesson["example"], f"For example: {lesson['example']}. Now repeat it out loud.")]
+    # (card label, primary text, secondary text, Chinese narration script)
+    sections = [
+        ("英语短语", lesson["phrase"], lesson["phrase_zh"], lesson["say_it"]),
+        ("中文讲解", lesson["meaning_zh"], lesson["phrase"], lesson["get_it"]),
+        ("实用例句", lesson["example"], lesson["example_zh"], lesson["use_it"]),
+    ]
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         segments = []
-        for index, (label, text, narration) in enumerate(sections, 1):
+        for index, (label, primary, secondary, narration) in enumerate(sections, 1):
             png, audio, video = [tmp / f"{index}.{ext}" for ext in ("png", "mp3", "mp4")]
-            card(label, text, lesson["title"], index, png)
+            card(label, primary, secondary, lesson["title"], index, png)
             if test_audio:
                 run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(audio)])
             else:
-                asyncio.run(speak(narration, os.environ.get("REEL_VOICE", "en-US-AriaNeural"), audio))
+                asyncio.run(speak(narration, os.environ.get("REEL_VOICE", "zh-CN-XiaoxiaoNeural"), audio))
             duration = float(probe(audio)["format"]["duration"]) + 0.5
             run(["ffmpeg", "-y", "-loop", "1", "-framerate", "30", "-i", str(png), "-i", str(audio),
                 "-map", "0:v:0", "-map", "1:a:0", "-vf",
@@ -184,8 +218,8 @@ def render(lesson, request_id, base_url, public, test_audio=False):
     if target.stat().st_size > 90 * 1024 * 1024:
         raise ValueError("Video exceeds renderer's 90 MiB limit")
     duration = float(data["format"]["duration"])
-    if duration > 90:
-        raise ValueError("Lesson exceeds renderer's 90 second limit")
+    if duration > 120:
+        raise ValueError("Lesson exceeds renderer's 120 second limit")
     manifest = {"request_id": request_id, "status": "ready", "video_url": f"{base_url.rstrip('/')}/reels/{request_id}/reel.mp4",
         "design_version": 2, "title": lesson["title"], "duration_seconds": round(duration, 2), "width": 1080, "height": 1920,
         "created_at": datetime.now(timezone.utc).isoformat(), "test_audio": test_audio}

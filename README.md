@@ -24,12 +24,19 @@ Ask Qwen to return only this JSON object, without markdown fences:
 {
   "title": "Sound more natural in English",
   "phrase": "I'm on my way.",
-  "meaning": "Use this when you have started travelling to meet someone.",
-  "example": "I'm on my way. I'll be there in ten minutes."
+  "phrase_zh": "我正在赶来的路上",
+  "meaning_zh": "当你已经出发去见某人时用这句话，比I am coming更自然。",
+  "example": "Don't worry, I'm on my way.",
+  "example_zh": "别担心，我正在赶来。",
+  "say_it": "今天教你一个很实用的英语短语：I am on my way，中文意思是，我正在赶来的路上。",
+  "get_it": "当你已经出发去见某人时，就可以说这句话。",
+  "use_it": "跟着我读一遍吧：Don't worry, I'm on my way。",
+  "level": "Beginner", "category": "vocabulary", "topic": "on my way",
+  "caption": "bilingual caption, max 1800 chars"
 }
 ```
 
-Title: maximum 100 characters. Other fields: maximum 240 each. Use English text supported by the bundled DejaVu font. The renderer rejects oversized text and videos above 90 seconds or 90 MiB.
+The teacher speaks Simplified Chinese and teaches English words. `say_it`/`get_it`/`use_it` are the Chinese narration scripts (max 120 chars each) with English words woven in. Limits: title 100; phrase/phrase_zh/example/example_zh 180 each; meaning_zh 300. Chinese text needs a CJK font — the workflow installs `fonts-noto-cjk` (DejaVu cannot render Chinese). The renderer rejects oversized text and videos above 120 seconds or 90 MiB.
 
 ## 3. Make: dispatch the render
 
