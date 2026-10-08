@@ -74,10 +74,3 @@ jobs:
             commit=$(git rev-parse FETCH_HEAD)
           fi
           git push origin "$commit:refs/heads/gh-pages"
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: public
-      - name: Deploy Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
